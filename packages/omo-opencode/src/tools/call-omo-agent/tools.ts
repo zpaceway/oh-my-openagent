@@ -19,6 +19,7 @@ import { createOrGetSession } from "./session-creator"
 import { processMessages } from "./message-processor"
 import { waitForCompletion } from "./completion-poller"
 import { getFirstFallbackModel } from "../../agents/builtin-agents/model-resolution"
+import { resolveParentContext } from "../delegate-task/parent-context-resolver"
 
 function createSyncExecutorDeps(modelFallbackControllerAccessor?: ModelFallbackControllerAccessor) {
   return {
@@ -34,12 +35,18 @@ function createSyncExecutorDeps(modelFallbackControllerAccessor?: ModelFallbackC
   }
 }
 
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
+
 function resolveModelAndFallbackChain(args: {
   subagentType: string
   agentOverrides?: AgentOverrides
   userCategories?: CategoriesConfig
+  inheritedModel?: string
+  inheritParentModel?: boolean
 }): { model: DelegatedModelConfig | undefined; fallbackChain: FallbackEntry[] | undefined } {
-  const { subagentType, agentOverrides, userCategories } = args
+  const { subagentType, agentOverrides, userCategories, inheritedModel, inheritParentModel } = args
   const agentConfigKey = getAgentConfigKey(subagentType)
   const agentRequirement = AGENT_MODEL_REQUIREMENTS[agentConfigKey]
 
@@ -47,22 +54,50 @@ function resolveModelAndFallbackChain(args: {
     ?? (agentOverrides
       ? Object.entries(agentOverrides).find(([key]) => key.toLowerCase() === agentConfigKey)?.[1]
       : undefined)
-  const agentCategoryModel = agentOverride?.category
+  const rawAgentCategoryModel = agentOverride?.category
     ? userCategories?.[agentOverride.category]?.model
     : undefined
-  const agentCategoryVariant = agentOverride?.category
+  const rawAgentCategoryVariant = agentOverride?.category
     ? userCategories?.[agentOverride.category]?.variant
     : undefined
+  const agentCategoryModel = isInheritValue(rawAgentCategoryModel) ? undefined : rawAgentCategoryModel
+  const agentCategoryVariant = isInheritValue(rawAgentCategoryModel) ? undefined : rawAgentCategoryVariant
+  const rawAgentModel = agentOverride?.model
+  const agentModelIsInherit = isInheritValue(rawAgentModel) || isInheritValue(rawAgentCategoryModel)
+  const hasExplicitModel = Boolean(rawAgentModel ?? rawAgentCategoryModel) && !agentModelIsInherit
+  const shouldInheritParent = Boolean(inheritedModel) && (agentModelIsInherit || (inheritParentModel === true && !hasExplicitModel))
+  if (shouldInheritParent && inheritedModel) {
+    const normalized = parseModelString(inheritedModel)
+    if (normalized) {
+      const modelFromParent: DelegatedModelConfig = normalized
+      log("[call_omo_agent] Resolved model via parent inheritance", {
+        agent: subagentType,
+        model: inheritedModel,
+      })
+      const normalizedFallbackModels = normalizeFallbackModels(
+        agentOverride?.fallback_models
+        ?? (agentOverride?.category ? userCategories?.[agentOverride.category]?.fallback_models : undefined)
+      )
+      const defaultProviderID = modelFromParent.providerID
+      const configuredFallbackChain = buildFallbackChainFromModels(normalizedFallbackModels, defaultProviderID)
+      return {
+        model: modelFromParent,
+        fallbackChain: configuredFallbackChain ?? agentRequirement?.fallbackChain,
+      }
+    }
+  }
+
+  const effectiveAgentModel = isInheritValue(rawAgentModel) ? undefined : rawAgentModel
 
   let model: DelegatedModelConfig | undefined
-  if (agentOverride?.model) {
-    const normalized = parseModelString(agentOverride.model)
+  if (effectiveAgentModel) {
+    const normalized = parseModelString(effectiveAgentModel)
     if (normalized) {
-      model = agentOverride.variant ? { ...normalized, variant: agentOverride.variant } : normalized
+      model = agentOverride?.variant ? { ...normalized, variant: agentOverride.variant } : normalized
       log("[call_omo_agent] Resolved model override from agent config", {
         agent: subagentType,
-        model: agentOverride.model,
-        variant: agentOverride.variant,
+        model: effectiveAgentModel,
+        variant: agentOverride?.variant,
       })
     }
   } else if (agentCategoryModel) {
@@ -114,6 +149,7 @@ export function createCallOmoAgent(
   agentOverrides?: AgentOverrides,
   userCategories?: CategoriesConfig,
   modelFallbackControllerAccessor?: ModelFallbackControllerAccessor,
+  inheritParentModel?: boolean,
 ): ToolDefinition {
   const agentDescriptions = ALLOWED_AGENTS.map(
     (name) => `- ${name}: Specialized agent for ${name} tasks`,
@@ -177,10 +213,22 @@ export function createCallOmoAgent(
         return `Error: Agent "${normalizedAgent}" is disabled via disabled_agents configuration. Remove it from disabled_agents in your .omo/omo.jsonc to use it.`
       }
 
+      let inheritedModelForCall: string | undefined
+      try {
+        const parentCtx = await resolveParentContext(toolCtx as unknown as import("../delegate-task/types").ToolContextWithMetadata, ctx.client as unknown as import("../delegate-task/types").OpencodeClient)
+        if (parentCtx.model) {
+          inheritedModelForCall = parentCtx.model.variant
+            ? `${parentCtx.model.providerID}/${parentCtx.model.modelID}(${parentCtx.model.variant})`
+            : `${parentCtx.model.providerID}/${parentCtx.model.modelID}`
+        }
+      } catch {}
+
       const { model: resolvedModel, fallbackChain } = resolveModelAndFallbackChain({
         subagentType: args.subagent_type,
         agentOverrides,
         userCategories,
+        inheritedModel: inheritedModelForCall,
+        inheritParentModel,
       })
 
       if (args.run_in_background) {

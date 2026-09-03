@@ -62,13 +62,17 @@ function categoryResolutionError(error: string): CategoryResolutionResult {
   }
 }
 
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
+
 export async function resolveCategoryExecution(
   args: DelegateTaskArgs,
   executorCtx: ExecutorContext,
   inheritedModel: string | undefined,
   systemDefaultModel: string | undefined
 ): Promise<CategoryResolutionResult> {
-  const { client, userCategories, sisyphusJuniorModel } = executorCtx
+  const { client, userCategories, sisyphusJuniorModel, inheritParentModel } = executorCtx
 
   const categoryName = args.category!
   const enabledCategories = mergeCategories(userCategories)
@@ -86,6 +90,7 @@ export async function resolveCategoryExecution(
     inheritedModel,
     systemDefaultModel,
     availableModels,
+    inheritParentModel,
   })
 
   if (!resolved) {
@@ -127,10 +132,45 @@ Available categories: ${allCategoryNames}`)
   let fallbackEntry: FallbackEntry | undefined
   let matchedFallback = false
 
-  const overrideModel = sisyphusJuniorModel
-  const explicitCategoryModel = hasCanonicalModels
+  const rawOverrideModel = sisyphusJuniorModel
+  const rawExplicitCategoryModel = hasCanonicalModels
     ? configuredPrimaryModel
     : userCategories?.[args.category!]?.model
+  const explicitIsInherit = isInheritValue(rawExplicitCategoryModel)
+  const overrideIsInherit = isInheritValue(rawOverrideModel)
+  const effectiveExplicitCategoryModel = explicitIsInherit ? undefined : rawExplicitCategoryModel
+  const effectiveOverrideModel = overrideIsInherit ? undefined : rawOverrideModel
+  const shouldInheritParent = Boolean(inheritedModel) && (explicitIsInherit || overrideIsInherit || (inheritParentModel === true && !effectiveExplicitCategoryModel))
+  const explicitCategoryModel = effectiveExplicitCategoryModel
+  const overrideModel = effectiveOverrideModel
+
+  if (shouldInheritParent && inheritedModel) {
+    const parsedInherited = parseModelString(inheritedModel)
+    if (parsedInherited) {
+      const variantToUse = userCategories?.[args.category!]?.variant ?? resolved.config.variant
+      const inheritedCategoryModel = variantToUse ? { ...parsedInherited, variant: variantToUse } : parsedInherited
+      const categoryModelFromParent = applyCategoryParams(inheritedCategoryModel, resolved.config)
+      const actualModelFromParent = inheritedModel
+      const categoryPromptAppend = resolveCategoryPromptAppendForModel(
+        args.category!,
+        actualModelFromParent,
+        resolved.promptAppend,
+        userCategories?.[args.category!]?.prompt_append,
+      )
+      const resolvedModelLower = actualModelFromParent.toLowerCase()
+      const isUnstableAgent = resolved.config.is_unstable_agent ?? (resolvedModelLower.includes("gemini") || resolvedModelLower.includes("minimax"))
+      return {
+        agentToUse: SISYPHUS_JUNIOR_AGENT,
+        categoryModel: categoryModelFromParent,
+        categoryPromptAppend,
+        maxPromptTokens: resolved.config.max_prompt_tokens,
+        modelInfo: { model: actualModelFromParent, type: "inherited", source: "override" },
+        actualModel: actualModelFromParent,
+        isUnstableAgent,
+        fallbackChain: undefined,
+      }
+    }
+  }
 
   if (!requirement) {
     // Precedence: explicit category model > sisyphus-junior default > category resolved model

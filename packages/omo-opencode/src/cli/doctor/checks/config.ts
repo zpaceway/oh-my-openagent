@@ -3,7 +3,7 @@ import { validatePluginConfig } from "../../../config/validate"
 import { CHECK_IDS, CHECK_NAMES, PACKAGE_NAME } from "../framework/constants"
 import type { CheckResult, DoctorIssue } from "../framework/types"
 import { loadAvailableModelsFromCache } from "./model-resolution-cache"
-import { getModelResolutionInfoWithOverrides } from "./model-resolution"
+import { getModelResolutionInfoWithOverrides, isInheritModelValue } from "./model-resolution"
 import type { OmoConfig } from "./model-resolution-types"
 import { findLegacyConfigLeftovers, legacyConfigLeftoverWarning } from "./legacy-config-leftovers"
 
@@ -36,7 +36,7 @@ function toOmoConfig(config: OhMyOpenCodeConfig): OmoConfig {
     categories[name] = entry
   }
 
-  return { agents, categories }
+  return { agents, categories, inherit: config.inherit }
 }
 
 function validateConfig(): ConfigValidationResult {
@@ -60,10 +60,10 @@ function collectModelResolutionIssues(config: OmoConfig): DoctorIssue[] {
   const resolution = getModelResolutionInfoWithOverrides(config)
 
   const invalidAgentOverrides = resolution.agents.filter(
-    (agent) => agent.userOverride && !agent.userOverride.includes("/")
+    (agent) => agent.userOverride && !isInheritModelValue(agent.userOverride) && !agent.userOverride.includes("/")
   )
   const invalidCategoryOverrides = resolution.categories.filter(
-    (category) => category.userOverride && !category.userOverride.includes("/")
+    (category) => category.userOverride && !isInheritModelValue(category.userOverride) && !category.userOverride.includes("/")
   )
 
   for (const invalidAgent of invalidAgentOverrides) {
@@ -90,7 +90,7 @@ function collectModelResolutionIssues(config: OmoConfig): DoctorIssue[] {
       ...resolution.agents.map((agent) => agent.userOverride),
       ...resolution.categories.map((category) => category.userOverride),
     ]
-      .filter((value): value is string => Boolean(value))
+      .filter((value): value is string => Boolean(value) && !isInheritModelValue(value))
       .map((value) => value.split("/")[0])
       .filter((provider) => provider.length > 0 && !providerSet.has(provider))
 

@@ -8,6 +8,7 @@ export interface AgentResolutionInfo {
   userVariant?: string
   effectiveModel: string
   effectiveResolution: string
+  inheritsParentModel?: boolean
   capabilityDiagnostics?: ModelCapabilitiesDiagnostics
 }
 
@@ -18,6 +19,7 @@ export interface CategoryResolutionInfo {
   userVariant?: string
   effectiveModel: string
   effectiveResolution: string
+  inheritsParentModel?: boolean
   capabilityDiagnostics?: ModelCapabilitiesDiagnostics
 }
 
@@ -29,6 +31,7 @@ export interface ModelResolutionInfo {
 export interface OmoConfig {
   agents?: Record<string, { model?: string; variant?: string; category?: string }>
   categories?: Record<string, { model?: string; variant?: string }>
+  inherit?: boolean
 }
 
 export interface AvailableModelsInfo {

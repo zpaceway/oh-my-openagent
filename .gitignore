@@ -49,6 +49,9 @@ oauth-success.html
 .dori/
 .playwright-mcp/
 
+# Local owner-only workspace (never commit)
+.local/
+
 # Debugging / session artifacts (skill workspace residue)
 .debugging
 .debug-journal*.md

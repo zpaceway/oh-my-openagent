@@ -141,13 +141,17 @@ export function createDelegateTask(options: DelegateTaskToolOptions): ToolDefini
       }
 
       const inheritedModel = parentContext.model
-        ? `${parentContext.model.providerID}/${parentContext.model.modelID}`
+        ? parentContext.model.variant
+          ? `${parentContext.model.providerID}/${parentContext.model.modelID}(${parentContext.model.variant})`
+          : `${parentContext.model.providerID}/${parentContext.model.modelID}`
         : undefined
 
       const currentModelConfig = options.loadCurrentModelConfig?.()
+      const inheritFromCurrent = currentModelConfig?.inherit ?? options.inheritParentModel
+      const effectiveInherit = inheritFromCurrent === true
       const modelOptions = currentModelConfig === undefined
-        ? options
-        : { ...options, userCategories: currentModelConfig.categories, agentOverrides: currentModelConfig.agents }
+        ? { ...options, inheritParentModel: effectiveInherit, inheritedModel }
+        : { ...options, userCategories: currentModelConfig.categories, agentOverrides: currentModelConfig.agents, inheritParentModel: effectiveInherit, inheritedModel }
 
       let agentToUse: string
       let categoryModel: DelegatedModelConfig | undefined

@@ -8,6 +8,19 @@ function formatCapabilityResolutionLabel(mode: string | undefined): string {
   return mode ?? "unknown"
 }
 
+function getInheritDisplayVariant(
+  kind: "agent" | "category",
+  name: string,
+  config: OmoConfig
+): string | undefined {
+  if (kind === "category") {
+    return config.categories?.[name]?.variant
+  }
+  const agentOverride = config.agents?.[name]
+  return agentOverride?.variant
+    ?? (agentOverride?.category ? config.categories?.[agentOverride.category]?.variant : undefined)
+}
+
 export function buildModelResolutionDetails(options: {
   info: ModelResolutionInfo
   available: AvailableModelsInfo
@@ -36,25 +49,25 @@ export function buildModelResolutionDetails(options: {
   details.push("")
   details.push("Agents:")
   for (const agent of options.info.agents) {
-    const marker = agent.userOverride ? "●" : "○"
-    const display = formatModelWithVariant(
-      agent.effectiveModel,
-      getEffectiveVariant(agent.name, agent.requirement, options.config)
-    )
+    const marker = agent.userOverride ? "●" : agent.inheritsParentModel ? "◐" : "○"
+    const variant = agent.inheritsParentModel
+      ? getInheritDisplayVariant("agent", agent.name, options.config)
+      : getEffectiveVariant(agent.name, agent.requirement, options.config)
+    const display = formatModelWithVariant(agent.effectiveModel, variant)
     details.push(`  ${marker} ${agent.name}: ${display} [capabilities: ${formatCapabilityResolutionLabel(agent.capabilityDiagnostics?.resolutionMode)}]`)
   }
   details.push("")
   details.push("Categories:")
   for (const category of options.info.categories) {
-    const marker = category.userOverride ? "●" : "○"
-    const display = formatModelWithVariant(
-      category.effectiveModel,
-      getCategoryEffectiveVariant(category.name, category.requirement, options.config)
-    )
+    const marker = category.userOverride ? "●" : category.inheritsParentModel ? "◐" : "○"
+    const variant = category.inheritsParentModel
+      ? getInheritDisplayVariant("category", category.name, options.config)
+      : getCategoryEffectiveVariant(category.name, category.requirement, options.config)
+    const display = formatModelWithVariant(category.effectiveModel, variant)
     details.push(`  ${marker} ${category.name}: ${display} [capabilities: ${formatCapabilityResolutionLabel(category.capabilityDiagnostics?.resolutionMode)}]`)
   }
   details.push("")
-  details.push("● = user override, ○ = provider fallback")
+  details.push("● = user override, ○ = provider fallback, ◐ = parent inheritance")
 
   return details
 }

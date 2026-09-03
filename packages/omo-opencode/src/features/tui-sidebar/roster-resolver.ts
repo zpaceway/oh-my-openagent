@@ -62,7 +62,7 @@ function toModelResolutionConfig(config: OhMyOpenCodeConfig): OmoConfig {
     if (category) categories[name] = pickCategoryModelConfig(category)
   }
 
-  return { agents, categories }
+  return { agents, categories, inherit: config.inherit }
 }
 
 export function resolveRoster(directory: string): RosterRow[] {

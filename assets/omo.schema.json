@@ -49,6 +49,9 @@
     "$schema": {
       "type": "string"
     },
+    "inherit": {
+      "type": "boolean"
+    },
     "categories": {
       "type": "object",
       "propertyNames": {
@@ -11770,6 +11773,9 @@
           ],
           "additionalProperties": false
         },
+        "inherit": {
+          "type": "boolean"
+        },
         "_migrations": {
           "type": "array",
           "items": {
@@ -15077,6 +15083,9 @@
               }
             },
             "additionalProperties": false
+          },
+          "inherit": {
+            "type": "boolean"
           },
           "categories": {
             "type": "object",
@@ -26562,6 +26571,9 @@
                   "goal"
                 ],
                 "additionalProperties": false
+              },
+              "inherit": {
+                "type": "boolean"
               },
               "_migrations": {
                 "type": "array",

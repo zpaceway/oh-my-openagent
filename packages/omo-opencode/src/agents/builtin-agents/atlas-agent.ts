@@ -2,11 +2,15 @@ import type { AgentConfig } from "@opencode-ai/sdk"
 import type { AgentOverrides } from "../types"
 import type { CategoriesConfig, CategoryConfig } from "../../config/schema"
 import type { AvailableAgent, AvailableSkill } from "../dynamic-agent-prompt-builder"
-import { AGENT_MODEL_REQUIREMENTS } from "../../shared"
+import { AGENT_MODEL_REQUIREMENTS, isModelAvailable } from "../../shared"
 import { log } from "../../shared/logger"
 import { applyOverrides } from "./agent-overrides"
-import { applyModelResolution } from "./model-resolution"
+import { applyModelResolution, getFirstFallbackModel } from "./model-resolution"
 import { createAtlasAgent } from "../atlas"
+
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
 
 export function maybeCreateAtlasConfig(input: {
   disabledAgents: string[]
@@ -20,6 +24,7 @@ export function maybeCreateAtlasConfig(input: {
   directory?: string
   userCategories?: CategoriesConfig
   useTaskSystem?: boolean
+  inheritParentModel?: boolean
 }): AgentConfig | undefined {
   const {
     disabledAgents,
@@ -32,25 +37,36 @@ export function maybeCreateAtlasConfig(input: {
     mergedCategories,
     directory,
     userCategories,
+    inheritParentModel = false,
   } = input
 
   if (disabledAgents.includes("atlas")) return undefined
 
   const orchestratorOverride = agentOverrides["atlas"]
   const atlasRequirement = AGENT_MODEL_REQUIREMENTS["atlas"]
+  const orchestratorCategory = orchestratorOverride?.category
+  const concreteModel = orchestratorOverride?.model && !isInheritValue(orchestratorOverride.model)
+    ? orchestratorOverride.model
+    : undefined
+  const agentIsInherit = isInheritValue(orchestratorOverride?.model)
+    || isInheritValue(orchestratorCategory ? mergedCategories[orchestratorCategory]?.model : undefined)
 
   let atlasResolution = applyModelResolution({
     uiSelectedModel: orchestratorOverride?.model !== undefined ? undefined : uiSelectedModel,
-    userModel: orchestratorOverride?.model,
+    userModel: concreteModel,
     requirement: atlasRequirement,
     availableModels,
     systemDefaultModel,
   })
 
-  if (!atlasResolution && orchestratorOverride?.model) {
+  if (!atlasResolution && concreteModel) {
     // User explicitly configured a model but resolution failed (e.g., cold cache, no system default).
     // Honor the user's choice directly instead of dropping Atlas entirely.
-    atlasResolution = { model: orchestratorOverride.model, provenance: "override" as const }
+    atlasResolution = { model: concreteModel, provenance: "override" as const }
+  }
+
+  if (!atlasResolution && (inheritParentModel || agentIsInherit)) {
+    atlasResolution = getFirstFallbackModel(atlasRequirement)
   }
 
   if (!atlasResolution) {
@@ -74,6 +90,16 @@ export function maybeCreateAtlasConfig(input: {
   }
 
   orchestratorConfig = applyOverrides(orchestratorConfig, orchestratorOverride, mergedCategories, directory)
+
+  if ((inheritParentModel || agentIsInherit) && !concreteModel && orchestratorConfig.model
+    && !isModelAvailable(orchestratorConfig.model, availableModels)) {
+    delete orchestratorConfig.model
+    const explicitVariant = orchestratorOverride?.variant
+      ?? (orchestratorCategory ? mergedCategories[orchestratorCategory]?.variant : undefined)
+    if (!explicitVariant) {
+      delete orchestratorConfig.variant
+    }
+  }
 
   return orchestratorConfig
 }

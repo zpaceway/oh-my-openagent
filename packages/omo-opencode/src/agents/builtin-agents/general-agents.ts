@@ -11,6 +11,10 @@ import { applyEnvironmentContext } from "./environment-context"
 import { applyModelResolution, getFirstFallbackModel } from "./model-resolution"
 import { log } from "../../shared/logger"
 
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
+
 export function collectPendingBuiltinAgents(input: {
   agentSources: Record<BuiltinAgentName, import("../agent-builder").AgentSource>
   agentMetadata: Partial<Record<BuiltinAgentName, AgentPromptMetadata>>
@@ -28,6 +32,7 @@ export function collectPendingBuiltinAgents(input: {
   teamModeEnabled?: boolean
   useTaskSystem?: boolean
   disableOmoEnv?: boolean
+  inheritParentModel?: boolean
 }): { pendingAgentConfigs: Map<string, AgentConfig>; availableAgents: AvailableAgent[] } {
   const {
     agentSources,
@@ -45,6 +50,7 @@ export function collectPendingBuiltinAgents(input: {
     disabledSkills,
     teamModeEnabled,
     disableOmoEnv = false,
+    inheritParentModel = false,
   } = input
 
   const availableAgents: AvailableAgent[] = []
@@ -62,6 +68,10 @@ export function collectPendingBuiltinAgents(input: {
     const override = agentOverrides[agentName]
       ?? Object.entries(agentOverrides).find(([key]) => key.toLowerCase() === agentName.toLowerCase())?.[1]
     const requirement = AGENT_MODEL_REQUIREMENTS[agentName]
+    const overrideCategory = override?.category
+    const concreteModel = override?.model && !isInheritValue(override.model) ? override.model : undefined
+    const agentIsInherit = isInheritValue(override?.model)
+      || isInheritValue(overrideCategory ? mergedCategories[overrideCategory]?.model : undefined)
 
     // Check if agent requires a specific model
     if (requirement?.requiresModel && availableModels) {
@@ -78,20 +88,20 @@ export function collectPendingBuiltinAgents(input: {
 
     let resolution = applyModelResolution({
       uiSelectedModel: (isPrimaryAgent && override?.model === undefined) ? uiSelectedModel : undefined,
-      userModel: override?.model,
+      userModel: concreteModel,
       requirement,
       availableModels,
       systemDefaultModel,
     })
     if (!resolution) {
-      if (override?.model) {
+      if (concreteModel) {
         // User explicitly configured a model but resolution failed (e.g., cold cache).
         // Honor the user's choice directly instead of falling back to hardcoded chain.
         log("[agent-registration] User-configured model not resolved, using as-is", {
           agent: agentName,
-          configuredModel: override.model,
+          configuredModel: concreteModel,
         })
-        resolution = { model: override.model, provenance: "override" as const }
+        resolution = { model: concreteModel, provenance: "override" as const }
       } else {
         resolution = getFirstFallbackModel(requirement)
       }
@@ -118,6 +128,19 @@ export function collectPendingBuiltinAgents(input: {
 
     config = applyOverrides(config, override, mergedCategories, directory)
     config = resolveAgentSkills(config, { gitMasterConfig, browserProvider, disabledSkills, teamModeEnabled })
+
+    // With inherit semantics and no concrete model, a placeholder the current
+    // environment cannot serve would make opencode reject the agent on switch.
+    // Omit it so the session model is used instead.
+    if ((inheritParentModel || agentIsInherit) && !concreteModel && config.model
+      && !isModelAvailable(config.model, availableModels)) {
+      delete config.model
+      const explicitVariant = override?.variant
+        ?? (overrideCategory ? mergedCategories[overrideCategory]?.variant : undefined)
+      if (!explicitVariant) {
+        delete config.variant
+      }
+    }
 
     // Store for later - will be added after sisyphus and hephaestus
     pendingAgentConfigs.set(name, config)

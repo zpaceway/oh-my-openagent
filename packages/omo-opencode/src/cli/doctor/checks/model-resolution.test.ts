@@ -244,6 +244,96 @@ describe("model-resolution check", () => {
         },
       })
     })
+
+    it("shows inherit for every agent and category when inherit is enabled with no overrides", async () => {
+      const { getModelResolutionInfoWithOverrides } = await import("./model-resolution")
+
+      // #given global inherit is enabled and nothing is explicitly configured
+      const info = getModelResolutionInfoWithOverrides({ inherit: true })
+
+      // #when reading the display models
+      // #then all rows inherit instead of showing internal fallback defaults
+      expect(info.agents.length).toBeGreaterThan(0)
+      for (const agent of info.agents) {
+        expect(agent.effectiveModel).toBe("inherit")
+        expect(agent.inheritsParentModel).toBe(true)
+        expect(agent.effectiveResolution).toContain("inherit")
+      }
+      expect(info.categories.length).toBeGreaterThan(0)
+      for (const category of info.categories) {
+        expect(category.effectiveModel).toBe("inherit")
+        expect(category.inheritsParentModel).toBe(true)
+      }
+    })
+
+    it("keeps explicit override display when inherit is enabled", async () => {
+      const { getModelResolutionInfoWithOverrides } = await import("./model-resolution")
+
+      // #given global inherit plus an explicit agent model
+      const info = getModelResolutionInfoWithOverrides({
+        inherit: true,
+        agents: {
+          oracle: { model: "anthropic/claude-opus-4-7" },
+        },
+      })
+
+      // #when reading the display models
+      // #then the explicit override wins and other rows still inherit
+      const oracle = expectDefined(info.agents.find((a) => a.name === "oracle"), "oracle agent resolution")
+      expect(oracle.effectiveModel).toBe("anthropic/claude-opus-4-7")
+      expect(oracle.inheritsParentModel).toBeUndefined()
+      const looker = expectDefined(
+        info.agents.find((a) => a.name === "multimodal-looker"),
+        "multimodal-looker agent resolution",
+      )
+      expect(looker.effectiveModel).toBe("inherit")
+    })
+
+    it("shows inherit for the sentinel model even when the global flag is off", async () => {
+      const { getModelResolutionInfoWithOverrides } = await import("./model-resolution")
+
+      // #given an explicit inherit sentinel without the global flag
+      const info = getModelResolutionInfoWithOverrides({
+        agents: {
+          "multimodal-looker": { model: "inherit" },
+        },
+      })
+
+      // #when reading the display models
+      // #then that row inherits while the rest fall back
+      const looker = expectDefined(
+        info.agents.find((a) => a.name === "multimodal-looker"),
+        "multimodal-looker agent resolution",
+      )
+      expect(looker.effectiveModel).toBe("inherit")
+      expect(looker.inheritsParentModel).toBe(true)
+      const oracle = expectDefined(info.agents.find((a) => a.name === "oracle"), "oracle agent resolution")
+      expect(oracle.inheritsParentModel).toBeUndefined()
+      expect(oracle.effectiveModel).not.toBe("inherit")
+    })
+
+    it("shows inherit for an agent whose category model is inherit", async () => {
+      const { getModelResolutionInfoWithOverrides } = await import("./model-resolution")
+
+      // #given an agent routed through a category set to inherit
+      const info = getModelResolutionInfoWithOverrides({
+        agents: {
+          "multimodal-looker": { category: "quick" },
+        },
+        categories: {
+          quick: { model: "inherit" },
+        },
+      })
+
+      // #when reading the display models
+      // #then the agent row inherits via its category
+      const looker = expectDefined(
+        info.agents.find((a) => a.name === "multimodal-looker"),
+        "multimodal-looker agent resolution",
+      )
+      expect(looker.effectiveModel).toBe("inherit")
+      expect(looker.inheritsParentModel).toBe(true)
+    })
   })
 
   describe("checkModelResolution", () => {

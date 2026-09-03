@@ -103,6 +103,8 @@ export const OhMyOpenCodeConfigSchema = z.object({
   start_work: UlwExecuteConfigSchema.optional(),
   /** Default mode auto-activation settings (ultrawork, goal) */
   default_mode: DefaultModeConfigSchema.optional(),
+  // @allow - schema field requires doc for editor autocomplete
+  inherit: z.boolean().optional(),
   /** Migration history to prevent re-applying migrations (e.g., model version upgrades) */
   _migrations: z.array(z.string()).optional(),
 })

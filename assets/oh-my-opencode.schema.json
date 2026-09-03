@@ -9895,6 +9895,9 @@
       ],
       "additionalProperties": false
     },
+    "inherit": {
+      "type": "boolean"
+    },
     "_migrations": {
       "type": "array",
       "items": {

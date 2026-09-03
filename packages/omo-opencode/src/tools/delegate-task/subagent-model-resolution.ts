@@ -3,6 +3,7 @@ import { getAgentConfigKey } from "../../shared/agent-display-names"
 import { fuzzyMatchModel } from "../../shared/model-availability"
 import { buildFallbackChainFromModels } from "../../shared/fallback-chain-from-models"
 import { normalizeModelFormat } from "../../shared/model-format-normalizer"
+import { parseModelString } from "../../shared/model-string-parser"
 import { flattenToFallbackModelStrings, normalizeFallbackModels } from "../../shared/model-resolver"
 import { AGENT_MODEL_REQUIREMENTS } from "../../shared/model-requirements"
 import { log } from "../../shared/logger"
@@ -20,6 +21,10 @@ function findAgentOverride(agentOverrides: AgentOverrides | undefined, agentConf
     ?? Object.entries(agentOverrides ?? {}).find(([key]) => key.toLowerCase() === agentConfigKey)?.[1]
 }
 
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
+
 export async function resolveSubagentModel(
   agentToUse: string,
   matchedAgent: AgentInfo,
@@ -34,8 +39,48 @@ export async function resolveSubagentModel(
   const agentCategoryConfig = agentOverride?.category
     ? executorCtx.userCategories?.[agentOverride.category]
     : undefined
-  const agentCategoryModel = agentCategoryConfig?.model
-  const hasExplicitUserModel = Boolean(agentOverride?.model ?? agentCategoryModel)
+  const rawAgentCategoryModel = agentCategoryConfig?.model
+  const rawAgentModel = agentOverride?.model ?? rawAgentCategoryModel
+  const agentIsInherit = isInheritValue(agentOverride?.model) || isInheritValue(rawAgentCategoryModel)
+  const hasExplicitUserModel = Boolean(rawAgentModel) && !agentIsInherit
+  const inheritedModel = executorCtx.inheritedModel
+  const inheritParent = executorCtx.inheritParentModel === true
+  const shouldInheritParent = Boolean(inheritedModel) && (agentIsInherit || (inheritParent === true && !hasExplicitUserModel))
+  if (shouldInheritParent && inheritedModel) {
+    const parsedParent = parseModelString(inheritedModel)
+    const normalized = parsedParent ?? normalizeModelFormat(inheritedModel)
+    if (normalized) {
+      const parsedVariant = (parsedParent as { variant?: string } | null)?.variant
+      const variantToUse = agentOverride?.variant ?? agentCategoryConfig?.variant ?? parsedVariant
+      const resolvedModel = variantToUse && variantToUse !== parsedVariant ? { ...normalized, variant: variantToUse } : normalized
+      categoryModel = applyCategoryParams(resolvedModel as import("../../shared/model-resolution-types").DelegatedModelConfig, agentCategoryConfig)
+      const defaultProviderID = categoryModel.providerID
+      const normalizedAgentFallbackModels = normalizeFallbackModels(
+        agentOverride?.fallback_models
+        ?? agentCategoryConfig?.fallback_models
+      )
+      const configuredFallbackChain = buildFallbackChainFromModels(
+        normalizedAgentFallbackModels,
+        defaultProviderID,
+      )
+      fallbackChain = configuredFallbackChain ?? undefined
+      const effectiveEntry = resolveEffectiveFallbackEntry({
+        categoryModel,
+        configuredFallbackChain,
+        resolution: { model: inheritedModel, variant: (parsedParent as { variant?: string } | null)?.variant } as unknown as ReturnType<typeof resolveModelForDelegateTask>,
+      })
+      if (categoryModel && effectiveEntry) {
+        categoryModel = applyFallbackEntrySettings({
+          categoryModel,
+          effectiveEntry,
+          variantOverride: agentOverride?.variant,
+        })
+      }
+      return { categoryModel, fallbackChain }
+    }
+  }
+  const effectiveAgentOverrideModel = isInheritValue(agentOverride?.model) ? undefined : agentOverride?.model
+  const agentCategoryModel = isInheritValue(rawAgentCategoryModel) ? undefined : rawAgentCategoryModel
   const normalizedAgentFallbackModels = normalizeFallbackModels(
     agentOverride?.fallback_models
     ?? agentCategoryConfig?.fallback_models
@@ -49,9 +94,9 @@ export async function resolveSubagentModel(
     ? `${normalizedMatchedModel.providerID}/${normalizedMatchedModel.modelID}`
     : undefined
 
-  if (agentOverride?.model || agentCategoryModel || agentRequirement || matchedAgent.model) {
+  if (effectiveAgentOverrideModel || agentCategoryModel || agentRequirement || matchedAgent.model) {
     const resolution = resolveModelForDelegateTask({
-      userModel: agentOverride?.model ?? agentCategoryModel,
+      userModel: effectiveAgentOverrideModel ?? agentCategoryModel,
       userFallbackModels: flattenToFallbackModelStrings(normalizedAgentFallbackModels),
       categoryDefaultModel: matchedAgentModelStr,
       fallbackChain: agentRequirement?.fallbackChain,
@@ -68,8 +113,8 @@ export async function resolveSubagentModel(
         const resolvedModel = variantToUse ? { ...normalized, variant: variantToUse } : normalized
         categoryModel = applyCategoryParams(resolvedModel, agentCategoryConfig)
       }
-    } else if (resolutionSkipped && (agentOverride?.model ?? agentCategoryModel)) {
-      const explicitModel = agentOverride?.model ?? agentCategoryModel
+    } else if (resolutionSkipped && (effectiveAgentOverrideModel ?? agentCategoryModel)) {
+      const explicitModel = effectiveAgentOverrideModel ?? agentCategoryModel
       const normalized = explicitModel ? normalizeModelFormat(explicitModel) : undefined
       if (normalized) {
         const variantToUse = agentOverride?.variant ?? agentCategoryConfig?.variant

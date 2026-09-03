@@ -58,17 +58,42 @@ export function getModelResolutionInfo(): ModelResolutionInfo {
   return { agents, categories }
 }
 
+export function isInheritModelValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
+
+function resolveAgentInherit(config: OmoConfig, name: string): boolean {
+  const agentOverride = config.agents?.[name]
+  const categoryModel = agentOverride?.category
+    ? config.categories?.[agentOverride.category]?.model
+    : undefined
+  const rawModel = agentOverride?.model ?? categoryModel
+  const agentIsInherit = isInheritModelValue(agentOverride?.model) || isInheritModelValue(categoryModel)
+  const hasExplicitModel = Boolean(rawModel) && !agentIsInherit
+  return agentIsInherit || (config.inherit === true && !hasExplicitModel)
+}
+
+function resolveCategoryInherit(config: OmoConfig, name: string): boolean {
+  const rawModel = config.categories?.[name]?.model
+  const categoryIsInherit = isInheritModelValue(rawModel)
+  return categoryIsInherit || (config.inherit === true && !Boolean(rawModel))
+}
+
 export function getModelResolutionInfoWithOverrides(config: OmoConfig): ModelResolutionInfo {
   const agents: AgentResolutionInfo[] = Object.entries(AGENT_MODEL_REQUIREMENTS).map(([name, requirement]) => {
     const userOverride = config.agents?.[name]?.model
     const userVariant = config.agents?.[name]?.variant
+    const inheritsParentModel = resolveAgentInherit(config, name)
     return attachCapabilityDiagnostics({
       name,
       requirement,
       userOverride,
       userVariant,
-      effectiveModel: getEffectiveModel(requirement, userOverride),
-      effectiveResolution: buildEffectiveResolution(requirement, userOverride),
+      effectiveModel: inheritsParentModel ? "inherit" : getEffectiveModel(requirement, userOverride),
+      effectiveResolution: inheritsParentModel
+        ? "Parent model inheritance (inherit enabled)"
+        : buildEffectiveResolution(requirement, userOverride),
+      ...(inheritsParentModel ? { inheritsParentModel: true as const } : {}),
     })
   })
 
@@ -76,13 +101,17 @@ export function getModelResolutionInfoWithOverrides(config: OmoConfig): ModelRes
     ([name, requirement]) => {
       const userOverride = config.categories?.[name]?.model
       const userVariant = config.categories?.[name]?.variant
+      const inheritsParentModel = resolveCategoryInherit(config, name)
       return attachCapabilityDiagnostics({
         name,
         requirement,
         userOverride,
         userVariant,
-        effectiveModel: getEffectiveModel(requirement, userOverride),
-        effectiveResolution: buildEffectiveResolution(requirement, userOverride),
+        effectiveModel: inheritsParentModel ? "inherit" : getEffectiveModel(requirement, userOverride),
+        effectiveResolution: inheritsParentModel
+          ? "Parent model inheritance (inherit enabled)"
+          : buildEffectiveResolution(requirement, userOverride),
+        ...(inheritsParentModel ? { inheritsParentModel: true as const } : {}),
       })
     }
   )

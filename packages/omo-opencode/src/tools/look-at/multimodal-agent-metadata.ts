@@ -1,11 +1,15 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 import { MULTIMODAL_LOOKER_AGENT } from "./constants"
+import type { AgentOverrides } from "../../config/schema"
+import { getAgentConfigKey } from "../../shared/agent-display-names"
 import { fetchAvailableModels } from "../../shared/model-availability"
+import { parseModelString } from "../../shared"
 import { log } from "../../shared/logger"
 import { readConnectedProvidersCache } from "../../shared/connected-providers-cache"
 import { resolveModelPipeline } from "../../shared/model-resolution-pipeline"
 import { readVisionCapableModelsCache } from "../../shared/vision-capable-models-cache"
 import { buildMultimodalLookerFallbackChain } from "./multimodal-fallback-chain"
+import type { LookAtInheritOptions } from "./types"
 
 type AgentModel = { providerID: string; modelID: string }
 
@@ -124,10 +128,58 @@ function isConfiguredVisionModel(
   return getFullModelKey(configuredModel) === getFullModelKey(dynamicModel)
 }
 
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
+
+function findAgentOverride(agentOverrides: AgentOverrides | undefined, agentConfigKey: string) {
+  return agentOverrides?.[agentConfigKey as keyof AgentOverrides]
+    ?? Object.entries(agentOverrides ?? {}).find(([key]) => key.toLowerCase() === agentConfigKey)?.[1]
+}
+
+function resolveInheritedAgentMetadata(inherit?: LookAtInheritOptions): ResolvedAgentMetadata | undefined {
+  const inheritedModel = inherit?.inheritedModel
+  if (!inheritedModel) {
+    return undefined
+  }
+  const agentConfigKey = getAgentConfigKey(MULTIMODAL_LOOKER_AGENT)
+  const agentOverride = findAgentOverride(inherit?.agentOverrides, agentConfigKey)
+  const agentCategoryConfig = agentOverride?.category
+    ? inherit?.userCategories?.[agentOverride.category]
+    : undefined
+  const rawAgentCategoryModel = agentCategoryConfig?.model
+  const rawAgentModel = agentOverride?.model ?? rawAgentCategoryModel
+  const agentIsInherit = isInheritValue(agentOverride?.model) || isInheritValue(rawAgentCategoryModel)
+  const hasExplicitUserModel = Boolean(rawAgentModel) && !agentIsInherit
+  const shouldInheritParent = agentIsInherit || (inherit?.inheritParentModel === true && !hasExplicitUserModel)
+  if (!shouldInheritParent) {
+    return undefined
+  }
+  const normalized = parseModelString(inheritedModel)
+  if (!normalized) {
+    return undefined
+  }
+  const parsedVariant = (normalized as { variant?: string })?.variant
+  const variantToUse = agentOverride?.variant ?? agentCategoryConfig?.variant ?? parsedVariant
+  return {
+    agentModel: { providerID: normalized.providerID, modelID: normalized.modelID },
+    agentVariant: variantToUse,
+  }
+}
+
 export async function resolveMultimodalLookerAgentMetadata(
-  ctx: PluginInput
+  ctx: PluginInput,
+  inherit?: LookAtInheritOptions,
 ): Promise<ResolvedAgentMetadata> {
   try {
+    const inheritedMetadata = resolveInheritedAgentMetadata(inherit)
+    if (inheritedMetadata?.agentModel) {
+      log("[look_at] Using inherited parent model for multimodal-looker", {
+        model: getFullModelKey(inheritedMetadata.agentModel),
+      })
+      return inheritedMetadata
+    }
+
     const registeredMetadata = await resolveRegisteredAgentMetadata(ctx)
     const visionCapableModels = readVisionCapableModelsCache()
 

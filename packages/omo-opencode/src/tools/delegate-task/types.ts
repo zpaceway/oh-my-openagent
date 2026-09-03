@@ -112,11 +112,12 @@ export interface DelegateTaskToolOptions {
   availableSkills?: AvailableSkill[]
   agentOverrides?: AgentOverrides
   /** Reload model-bearing config at task invocation time so edits are honored without rebuilding tools. */
-  loadCurrentModelConfig?: () => Pick<OhMyOpenCodeConfig, "agents" | "categories">
+  loadCurrentModelConfig?: () => Pick<OhMyOpenCodeConfig, "agents" | "categories" | "inherit">
   sisyphusAgentConfig?: SisyphusAgentConfig
   modelFallbackControllerAccessor?: ModelFallbackControllerAccessor
   onSyncSessionCreated?: (event: SyncSessionCreatedEvent) => Promise<void>
   syncPollTimeoutMs?: number
+  inheritParentModel?: boolean
   /** OpenCode native skill accessor for skills registered via config.skills.paths. Same shape as SkillLoadOptions.nativeSkills. */
   nativeSkills?: {
     all(): { name: string; description: string; location: string; content: string }[] | Promise<{ name: string; description: string; location: string; content: string }[]>

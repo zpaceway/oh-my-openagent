@@ -30,6 +30,7 @@ export const OmoTypedHarnessConfigSchema = z.object({
 
 export const OmoConfigProfileSchema = z.object({
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
+  inherit: z.boolean().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsLayerSchema.optional(),
@@ -46,6 +47,7 @@ export const OmoConfigProfileSchema = z.object({
 export const OmoConfigSchema = z.object({
   formatOnMutation: OmoFormatOnMutationSchema.optional(),
   $schema: z.string().optional(),
+  inherit: z.boolean().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsSchema.optional(),
@@ -65,6 +67,7 @@ export const OmoConfigSchema = z.object({
 export const OmoConfigLayerSchema = z.object({
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
   $schema: z.string().optional(),
+  inherit: z.boolean().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsLayerSchema.optional(),

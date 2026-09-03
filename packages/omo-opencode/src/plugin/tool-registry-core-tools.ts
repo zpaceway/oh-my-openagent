@@ -34,6 +34,7 @@ export function createCoreTools(args: {
     pluginConfig.agents,
     pluginConfig.categories,
     managers.modelFallbackControllerAccessor,
+    pluginConfig.inherit,
   )
   const isMultimodalLookerEnabled = !(pluginConfig.disabled_agents ?? []).some(
     (agent) => agent.toLowerCase() === "multimodal-looker",
@@ -55,9 +56,10 @@ export function createCoreTools(args: {
     directory: ctx.directory,
     userCategories: pluginConfig.categories,
     agentOverrides: pluginConfig.agents,
+    inheritParentModel: pluginConfig.inherit ?? false,
     loadCurrentModelConfig: () => {
       const current = loadPluginConfig(ctx.directory, process.env)
-      return { agents: current.agents, categories: current.categories }
+      return { agents: current.agents, categories: current.categories, inherit: current.inherit }
     },
     gitMasterConfig: pluginConfig.git_master,
     sisyphusJuniorModel: getSisyphusJuniorModelOverride(pluginConfig.agents?.["sisyphus-junior"]),
@@ -136,7 +138,11 @@ export function createCoreTools(args: {
     call_omo_agent: callOmoAgent,
   }
   if (isMultimodalLookerEnabled) {
-    tools.look_at = factories.createLookAt(ctx)
+    tools.look_at = factories.createLookAt(ctx, {
+      inheritParentModel: pluginConfig.inherit ?? false,
+      agentOverrides: pluginConfig.agents,
+      userCategories: pluginConfig.categories,
+    })
   }
   tools.task = delegateTask
   tools.skill_mcp = skillMcpTool

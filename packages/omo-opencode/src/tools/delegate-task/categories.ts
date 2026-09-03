@@ -12,6 +12,11 @@ export interface ResolveCategoryConfigOptions {
   inheritedModel?: string
   systemDefaultModel?: string
   availableModels?: Set<string>
+  inheritParentModel?: boolean
+}
+
+function isInheritModelValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
 }
 
 export interface ResolveCategoryConfigResult {
@@ -54,7 +59,7 @@ export function resolveCategoryConfig(
   categoryName: string,
   options: ResolveCategoryConfigOptions
 ): ResolveCategoryConfigResult | null {
-  const { userCategories, inheritedModel: _inheritedModel, systemDefaultModel, availableModels } = options
+  const { userCategories, inheritedModel, systemDefaultModel, availableModels, inheritParentModel } = options
 
   const defaultConfig = DEFAULT_CATEGORIES[categoryName]
   const configuredUserConfig = userCategories?.[categoryName]
@@ -87,14 +92,33 @@ export function resolveCategoryConfig(
     return null
   }
 
-  // Model priority for categories: user override > category default > system default
-  // Categories have explicit models - no inheritance from parent session
+  const userModelIsInherit = isInheritModelValue(userConfig?.model)
+  const shouldInheritParent = Boolean(inheritedModel) && (userModelIsInherit || (inheritParentModel === true && !normalizeModel(userConfig?.model)))
+  if (shouldInheritParent && inheritedModel) {
+    const model = inheritedModel
+    const isUserConfiguredModel = false
+    const config: CategoryConfig = {
+      ...defaultConfig,
+      ...userConfig,
+      model,
+      variant: userConfig?.variant ?? defaultConfig?.variant,
+    }
+    let promptAppend = defaultPromptAppend
+    if (userConfig?.prompt_append) {
+      promptAppend = defaultPromptAppend
+        ? defaultPromptAppend + "\n\n" + userConfig.prompt_append
+        : userConfig.prompt_append
+    }
+    return { config, promptAppend, model, isUserConfiguredModel }
+  }
+
+  const effectiveUserModel = userModelIsInherit ? undefined : userConfig?.model
   const model = resolveModel({
-    userModel: userConfig?.model,
-    inheritedModel: defaultConfig?.model, // Category's built-in model takes precedence over system default
+    userModel: effectiveUserModel,
+    inheritedModel: defaultConfig?.model,
     systemDefault: systemDefaultModel,
   })
-  const isUserConfiguredModel = normalizeModel(userConfig?.model) !== undefined
+  const isUserConfiguredModel = normalizeModel(effectiveUserModel) !== undefined
   const config: CategoryConfig = {
     ...defaultConfig,
     ...userConfig,

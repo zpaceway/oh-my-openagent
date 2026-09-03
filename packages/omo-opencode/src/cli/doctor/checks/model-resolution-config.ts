@@ -19,7 +19,7 @@ function modelConfig(config: ReturnType<typeof validatePluginConfig>["config"]):
     }
     return Object.keys(entry).length === 0 ? [] : [[name, entry]]
   }))
-  return { agents, categories }
+  return { agents, categories, inherit: config.inherit }
 }
 
 export function loadOmoConfig(): OmoConfig {

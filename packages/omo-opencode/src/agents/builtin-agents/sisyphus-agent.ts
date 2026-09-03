@@ -2,7 +2,7 @@ import type { AgentConfig } from "@opencode-ai/sdk"
 import type { AgentOverrides } from "../types"
 import type { CategoriesConfig, CategoryConfig } from "../../config/schema"
 import type { AvailableAgent, AvailableCategory, AvailableSkill } from "../dynamic-agent-prompt-builder"
-import { AGENT_MODEL_REQUIREMENTS, isAnyFallbackModelAvailable } from "../../shared"
+import { AGENT_MODEL_REQUIREMENTS, isAnyFallbackModelAvailable, isModelAvailable } from "../../shared"
 import { log } from "../../shared/logger"
 import { applyEnvironmentContext } from "./environment-context"
 import { applyOverrides } from "./agent-overrides"
@@ -10,6 +10,10 @@ import { applyModelResolution, getFirstFallbackModel } from "./model-resolution"
 import { createSisyphusAgent } from "../sisyphus"
 import { applyFrontierToolSchemaPermission } from "../frontier-tool-schema-guard"
 import { setSisyphusRuntimePromptContext } from "../sisyphus-runtime-prompt-reconciler"
+
+function isInheritValue(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "inherit"
+}
 
 export function maybeCreateSisyphusConfig(input: {
   disabledAgents: string[]
@@ -26,6 +30,7 @@ export function maybeCreateSisyphusConfig(input: {
   userCategories?: CategoriesConfig
   useTaskSystem: boolean
   disableOmoEnv?: boolean
+  inheritParentModel?: boolean
 }): AgentConfig | undefined {
   const {
     disabledAgents,
@@ -41,12 +46,21 @@ export function maybeCreateSisyphusConfig(input: {
     directory,
     useTaskSystem,
     disableOmoEnv = false,
+    inheritParentModel = false,
   } = input
 
   const sisyphusOverride = agentOverrides["sisyphus"]
   const sisyphusRequirement = AGENT_MODEL_REQUIREMENTS["sisyphus"]
   const hasSisyphusExplicitConfig = sisyphusOverride !== undefined
+  const sisyphusCategory = sisyphusOverride?.category
+  const concreteModel = sisyphusOverride?.model && !isInheritValue(sisyphusOverride.model)
+    ? sisyphusOverride.model
+    : undefined
+  const agentIsInherit = isInheritValue(sisyphusOverride?.model)
+    || isInheritValue(sisyphusCategory ? mergedCategories[sisyphusCategory]?.model : undefined)
   const meetsSisyphusAnyModelRequirement =
+    inheritParentModel ||
+    agentIsInherit ||
     !sisyphusRequirement?.requiresAnyModel ||
     hasSisyphusExplicitConfig ||
     isFirstRunNoCache ||
@@ -61,14 +75,26 @@ export function maybeCreateSisyphusConfig(input: {
 
   let sisyphusResolution = applyModelResolution({
     uiSelectedModel: sisyphusOverride?.model !== undefined ? undefined : uiSelectedModel,
-    userModel: sisyphusOverride?.model,
+    userModel: concreteModel,
     requirement: sisyphusRequirement,
     availableModels,
     systemDefaultModel,
   })
 
-  if (isFirstRunNoCache && !sisyphusOverride?.model && !uiSelectedModel) {
+  if (isFirstRunNoCache && !concreteModel && !uiSelectedModel) {
     sisyphusResolution = getFirstFallbackModel(sisyphusRequirement)
+  }
+
+  if (!sisyphusResolution && (inheritParentModel || agentIsInherit)) {
+    if (concreteModel) {
+      log("[agent-registration] Inherit enabled: using explicitly configured model as-is", {
+        agent: "sisyphus",
+        configuredModel: concreteModel,
+      })
+      sisyphusResolution = { model: concreteModel, provenance: "override" as const }
+    } else {
+      sisyphusResolution = getFirstFallbackModel(sisyphusRequirement)
+    }
   }
 
   if (!sisyphusResolution) {
@@ -106,6 +132,16 @@ export function maybeCreateSisyphusConfig(input: {
   sisyphusConfig = applyEnvironmentContext(sisyphusConfig, directory, {
     disableOmoEnv,
   })
+
+  if ((inheritParentModel || agentIsInherit) && !concreteModel && sisyphusConfig.model
+    && !isModelAvailable(sisyphusConfig.model, availableModels)) {
+    delete sisyphusConfig.model
+    const explicitVariant = sisyphusOverride?.variant
+      ?? (sisyphusCategory ? mergedCategories[sisyphusCategory]?.variant : undefined)
+    if (!explicitVariant) {
+      delete sisyphusConfig.variant
+    }
+  }
 
   // The body above is baked from the *configured* model. If the user switches to
   // a different model in the TUI, the system-transform hook rebuilds the

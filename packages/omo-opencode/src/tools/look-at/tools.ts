@@ -1,16 +1,18 @@
 import { tool, type PluginInput, type ToolDefinition } from "@opencode-ai/plugin"
 import { LOOK_AT_DESCRIPTION } from "./constants"
-import type { LookAtArgs } from "./types"
+import type { LookAtArgs, LookAtToolOptions } from "./types"
 import { log } from "../../shared"
 import type { LookAtArgsWithAlias } from "./look-at-arguments"
 import { normalizeArgs, validateArgs } from "./look-at-arguments"
 import { prepareLookAtInput } from "./look-at-input-preparer"
 import { runLookAtSession } from "./look-at-session-runner"
 import { getMissingLookAtFilePath } from "./missing-file-error"
+import { resolveParentContext } from "../delegate-task/parent-context-resolver"
+import type { ToolContextWithMetadata } from "../delegate-task/types"
 
 export { normalizeArgs, validateArgs } from "./look-at-arguments"
 
-export function createLookAt(ctx: PluginInput): ToolDefinition {
+export function createLookAt(ctx: PluginInput, options?: LookAtToolOptions): ToolDefinition {
   return tool({
     description: LOOK_AT_DESCRIPTION,
     args: {
@@ -37,12 +39,28 @@ export function createLookAt(ctx: PluginInput): ToolDefinition {
       const { sourceDescription } = preparedInput
       log(`[look_at] Analyzing ${sourceDescription}, goal: ${args.goal}`)
 
+      let inheritedModel: string | undefined
+      try {
+        const parentCtx = await resolveParentContext(toolContext as unknown as ToolContextWithMetadata, ctx.client as unknown as import("../delegate-task/types").OpencodeClient)
+        if (parentCtx.model) {
+          inheritedModel = parentCtx.model.variant
+            ? `${parentCtx.model.providerID}/${parentCtx.model.modelID}(${parentCtx.model.variant})`
+            : `${parentCtx.model.providerID}/${parentCtx.model.modelID}`
+        }
+      } catch {}
+
       try {
         return await runLookAtSession({
           ctx,
           toolContext,
           goal: args.goal,
           inputParts: preparedInput.inputParts,
+          inherit: {
+            inheritedModel,
+            inheritParentModel: options?.inheritParentModel,
+            agentOverrides: options?.agentOverrides,
+            userCategories: options?.userCategories,
+          },
         })
       } catch (error) {
         const missingFilePath = getMissingLookAtFilePath(error, args)

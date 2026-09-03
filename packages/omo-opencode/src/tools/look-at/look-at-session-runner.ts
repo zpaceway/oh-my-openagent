@@ -5,6 +5,7 @@ import { extractLatestAssistantText } from "./assistant-message-extractor"
 import { MULTIMODAL_LOOKER_AGENT } from "./constants"
 import { READ_ENABLED, buildLookAtPrompt } from "./look-at-prompt"
 import type { LookAtFilePart, LookAtInputPart } from "./look-at-input-preparer"
+import type { LookAtInheritOptions } from "./types"
 import { resolveMultimodalLookerAgentMetadata } from "./multimodal-agent-metadata"
 import { waitForLookAtSessionResult } from "./session-poller"
 
@@ -13,6 +14,7 @@ interface RunLookAtSessionInput {
   toolContext: ToolContext
   goal: string
   inputParts: LookAtInputPart[]
+  inherit?: LookAtInheritOptions
 }
 
 export async function runLookAtSession({
@@ -20,10 +22,11 @@ export async function runLookAtSession({
   toolContext,
   goal,
   inputParts,
+  inherit,
 }: RunLookAtSessionInput): Promise<string> {
   const fileParts = inputParts.filter((part): part is LookAtFilePart => part.type === "file")
   const prompt = buildLookAtPrompt(goal, fileParts)
-  const { agentModel, agentVariant } = await resolveMultimodalLookerAgentMetadata(ctx)
+  const { agentModel, agentVariant } = await resolveMultimodalLookerAgentMetadata(ctx, inherit)
 
   log(`[look_at] Creating session with parent: ${toolContext.sessionID}`)
   const parentSession = await ctx.client.session.get({
